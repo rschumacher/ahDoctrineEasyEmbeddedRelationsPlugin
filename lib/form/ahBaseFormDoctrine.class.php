@@ -29,6 +29,7 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
         'newFormAfterExistingRelations' => false,
         'customEmbeddedFormLabelMethod' => null,
         'formFormatter' => null,
+				'sortable' => false,						// default: false --> meanings allow no sorting of objects
         'multipleNewForms' => false,
         'newFormsInitialCount' => 2,
         'newFormsContainerForm' => null, // pass BaseForm object here or we will create ahNewRelationsContainerForm
@@ -196,7 +197,13 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
     foreach ($this->embedRelations as $relationName => $keys)
     {
       $keys = $this->addDefaultRelationSettings($keys);
-
+			
+			if (($keys['sortable'] !== false) &&
+					isset($values[$relationName]) && is_array($values[$relationName])) {
+				$values[$relationName] = $this->reorderSubformValues($values[$relationName],
+																						$keys['sortable'], 	$keys, $relationName);
+			}
+			
       if (!$keys['noNewForm'])
       {
         $containerName = 'new_'.$relationName;
@@ -579,4 +586,70 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
     unset($subForm[$subForm->getCSRFFieldName()]);
     return $subForm;
   }
+
+
+	/**
+	 * reorderSubformValues() - re-orders the values' ids according to js-based sorting
+	 *							(works with jQuery sortable)
+	 *
+	 * @param array $values 		the array of item values (mandatory)
+	 * @param string $relationName 	the name of the relation (optional)
+	 * @return array $newValues		the newly ordered list of values for further processing
+	 */
+	public function reorderSubformValues($values, $sortingSpec, $keys, $relationName = null)
+	{
+		if (($sortingSpec === false) || ! is_array($values) || (count($values) <= 1)) {
+			return $values;		// preconditions for reordering aren't met, return without change
+		}
+		
+		$sortedValues = array();	// we make a copy right away as we will change only one field
+		
+		if ($sortingSpec === true) {
+			// principle:
+			// we do reorder the values but by preserving the id's
+			// (reason: the id's will be validated and checked for their original value)
+			
+			// first scan all items to collect the record ids in use
+			$idList = array();
+			foreach ($values as $oldKey => $value) {
+				$idList[$oldKey] = isset($value['id']) ? $value['id'] : false;
+			}
+			ksort($idList);				// sort the collected ids based on the key
+			
+			$sortedValues = array();	// start with an empty target array
+			$valuesCopy = $values;
+			foreach ($idList as $oldKey => $id) {
+				$sortedValues[$oldKey] = array_shift($valuesCopy);
+				
+				if ($id !== false) {
+					$sortedValues[$oldKey]['id'] = $id;
+				} else {
+					unset($sortedValues[$oldKey]['id']);
+				}
+			}
+			
+			// check that $idList is empty, else something's appears to be wrong
+			if (count($sortedValues) != count($values)) {
+				$t = get_class($this);
+				throw new sfException(sprintf("$t::reorderSubformValues(): failure %d <> %d",
+																							count($sortedValues), count($values)));
+			}
+			if (! empty($valuesCopy)) {
+				$t = get_class($this);
+				throw new sfException("$t::reorderSubformValues(): failure valuesCopy / " .
+																																count($valuesCopy));
+			}
+		} elseif (is_string($sortingSpec) && ! empty($sortingSpec)) {
+			$sortedValues = $values;	// we make a copy right away as we will change only one field
+			foreach ($sortedValues as $key => $value) {
+				if (is_array($value)) {
+					$sortedValues[$key][$sortingSpec] = $key;	// add or overwrite this value
+				}
+			}
+		} else {
+			$sortedValues = $values;	// unknown sorting specification, so we don't sort anything
+		}
+		
+		return $sortedValues;
+	}
 }
