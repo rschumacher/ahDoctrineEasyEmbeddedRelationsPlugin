@@ -13,6 +13,7 @@
 abstract class ahBaseFormDoctrine extends sfFormDoctrine
 {
   protected
+	$newObjectFormsToIgnore = array(),	// remember which new form items are to be ignored
     $scheduledForDeletion = array(), // related objects scheduled for deletion
     $embedRelations = array(),       // so we can check which relations are embedded in this form
     $defaultRelationSettings = array(
@@ -207,7 +208,11 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
             {
               if ($this->isNewFormEmpty($subFormValues, $keys))
               {
-                unset($values[$containerName][$index], $this->embeddedForms[$containerName][$index]);
+				if (isset($this->embeddedForms[$containerName][$index])) {
+					// we remember this form to be removed later (it's too early now)
+					$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName][$index];
+				}
+                unset($values[$containerName][$index]);
                 unset($this->validatorSchema[$containerName][$index]);
               }
               else
@@ -253,6 +258,10 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
         {
           if (!array_key_exists($containerName, $values) || $this->isNewFormEmpty($values[$containerName], $keys))
           {
+			if (isset($this->embeddedForms[$containerName])) {
+				// we remember this form to be removed later (it's too early now)
+				$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName];
+			}
             unset($values[$containerName], $this->validatorSchema[$containerName]);
           }
         }
@@ -350,11 +359,15 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
          * so there isn't anything weird happening
          */
         $relationName = $this->getRelationByEmbeddedFormClass($form);
-
-        if ($relationName && isset($this->scheduledForDeletion[$relationName]) && array_key_exists($form->getObject()->getId(), array_flip($this->scheduledForDeletion[$relationName])))
-        {
-          continue;
-        }
+		
+		if ($relationName) {
+			$idsToDelete = isset($this->scheduledForDeletion[$relationName]) ?
+			 				array_flip($this->scheduledForDeletion[$relationName]) : array();
+			if (in_array($form, $this->newObjectFormsToIgnore) ||
+					array_key_exists($form->getObject()->getId(), $idsToDelete)) {
+	          continue;
+	        }
+		}
 
         $form->getObject()->save($con);
         $form->saveEmbeddedForms($con);
