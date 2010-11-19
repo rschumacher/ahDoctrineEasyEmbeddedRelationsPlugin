@@ -13,7 +13,8 @@
 abstract class ahBaseFormDoctrine extends sfFormDoctrine
 {
   protected
-	$newObjectFormsToIgnore = array(),	// remember which new form items are to be ignored
+		$newObjectFormsToIgnore = array(),	// remember which new form items are to be ignored
+		$scheduledForInsertion = array(),		// remember which forms that contain real data
     $scheduledForDeletion = array(), // related objects scheduled for deletion
     $embedRelations = array(),       // so we can check which relations are embedded in this form
     $defaultRelationSettings = array(
@@ -208,10 +209,10 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
             {
               if ($this->isNewFormEmpty($subFormValues, $keys))
               {
-				if (isset($this->embeddedForms[$containerName][$index])) {
-					// we remember this form to be removed later (it's too early now)
-					$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName][$index];
-				}
+								if (isset($this->embeddedForms[$containerName][$index])) {
+									// we remember this form to be removed later (it's too early now)
+									$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName][$index];
+								}
                 unset($values[$containerName][$index]);
                 unset($this->validatorSchema[$containerName][$index]);
               }
@@ -230,6 +231,16 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
                   $this->widgetSchema[$containerName] = new sfWidgetFormSchemaDecorator($ef->getWidgetSchema(), $ef->getWidgetSchema()->getFormFormatter()->getDecoratorFormat());
                   $this->setDefault($containerName, $ef->getDefaults());
                 }
+				
+								// we're keeping track (maybe a bit too much info) of what we need to care about later:
+								$relation = $this->getObject()->getTable()->getRelation($relationName);
+								$subforms = $this->embeddedForms[$containerName];
+								$this->scheduledForInsertion[$containerName][$index] = array(
+												'form' => $subforms->embeddedForms[$index],
+												'relation' => $relation,
+												'relationName' => $relationName,
+												'container' => $containerName,
+												);
               }
             }
           }
@@ -258,12 +269,21 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
         {
           if (!array_key_exists($containerName, $values) || $this->isNewFormEmpty($values[$containerName], $keys))
           {
-			if (isset($this->embeddedForms[$containerName])) {
-				// we remember this form to be removed later (it's too early now)
-				$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName];
-			}
+						if (isset($this->embeddedForms[$containerName])) {
+							// we remember this form to be removed later (it's too early now)
+							$this->newObjectFormsToIgnore[] = $this->embeddedForms[$containerName];
+						}
             unset($values[$containerName], $this->validatorSchema[$containerName]);
           }
+				  else
+				  {
+						$this->scheduledForInsertion[$containerName][0] = array(
+										'form' => $this->embeddedForms[$containerName],
+										'relation' => $this->getObject()->getTable()->getRelation($relationName),
+										'relationName' => $relationName,
+										'container' => $containerName,
+										);
+					}
         }
       }
 
@@ -319,6 +339,24 @@ abstract class ahBaseFormDoctrine extends sfFormDoctrine
         }
       }
     }
+		
+		if (count($this->scheduledForInsertion) > 0) {
+			$mainObject = $this->getObject();
+			foreach ($this->scheduledForInsertion as $containerName => $newFormList) {
+				foreach ($newFormList as $insertionSpec) {
+					$relatedObject = $insertionSpec['form']->getObject();
+					$relation = $insertionSpec['relation'];
+					$relationName = $insertionSpec['relationName'];
+					if ($relation->isOneToOne()) {
+						$mainObject->$relationName = $relatedObject;
+					} else {
+						$relatedObjectList = $mainObject->$relationName;
+						$relatedObjectList[] = $relatedObject;
+					}
+					// $relatedObject->setRelated($relation->getForeignColumnName(), $mainObject);
+				}
+			}
+		}
 
     parent::doUpdateObject($values);
 
